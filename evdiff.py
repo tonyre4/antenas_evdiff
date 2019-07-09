@@ -123,41 +123,43 @@ class indi:
                     plt.show()
 
         def eval(self):
+                global cuts_t
+                ind = int((cuts_t+1)/2)-1
                 self.getPositions()
                 self.globo()
                 cont = self.mean()
-                idmax = np.argmax(self.graph)
-                past = self.graph[idmax]
-
-                for i in range(idmax,self.graph.shape[0]):
-                    if self.graph[i]<=0.5:
-                        self.leny = (i-idmax)*2
-                        break
-                else:
-                    print("Len error")
-                    print(self.graph[i])
-                    print(self.graph[idmax],idmax)
-                    plt.plot(self.graph)
-                    plt.show()
-
-                for i in range(idmax+1,self.graph.shape[0]):
-                    present = self.graph[i]
-                    if present>past:
-                        self.upy = np.max(self.graph[i:])
-                        break
-                    past = np.copy(present)
-                else:
-                    self.upy = 1e-7
-                    #print("Cut error")
-                    #print(past)
-                    #print(self.graph[idmax],idmax)
-                    #plt.plot(self.graph)
-                    #plt.show()
-
-                #print("l: ", self.leny)
-                #print("u: ", self.upy)
+                self.mid = self.graph[ind]
+                past = self.mid
+                maxi = np.max(self.graph)
+                idmax = ind
+                #print("mid:",ind)
+                #print("maxes:",self.mid,maxi)
                 #plt.plot(self.graph)
                 #plt.show()
+                if self.mid>=maxi:
+                    for i in range(idmax,self.graph.shape[0]):
+                        if self.graph[i]<=0.5:
+                            self.leny = (i-idmax)*2
+                            break
+                    else:
+                        print("Len error")
+                        print(self.graph[i])
+                        print(self.graph[idmax],idmax)
+                        plt.plot(self.graph)
+                        plt.show()
+
+                    for i in range(idmax+1,self.graph.shape[0]):
+                        present = self.graph[i]
+                        if present>past:
+                            self.upy = np.max(self.graph[i:])
+                            break
+                        past = np.copy(present)
+                    else:
+                            self.upy = present
+                else:
+                    self.leny = 2000.
+                    self.upy = 2. 
+
                 return self.leny, self.upy
 
 #Functions
@@ -168,26 +170,31 @@ def sortby(vals,n):
 def getInitPob(nPob,nAnt):
         pob = list()
         for i in range(nPob):
-                pob.append(indi(antenas=nAnt,initialize=True))
+            pob.append(indi(antenas=nAnt,initialize=True))
         return pob
 
 def evalu(pob):
     if type(pob) == list:
         ev = np.empty((0,1))
         for ind in pob:
-                leny,upy = ind.eval()
-                upy = upy*20
-                fnss = upy+leny
-                ev = np.vstack([ev,fnss])
+            leny,upy = ind.eval()
+            fnss = fitness(leny,upy)
+            ev = np.vstack([ev,fnss])
         ind = np.arange(ev.shape[0]).reshape(-1,1)
         ev = np.hstack([ind,ev])
     else:
       leny,upy = pob.eval()
-      upy = 20*upy
-      fnss = upy+leny
-      ev = fnss
+      ev = fitness(leny,upy)
     return ev
-      
+
+def fitness(leny,upy):
+    upy *= 100.0
+    global cuts_t
+    ind = (cuts_t+1)/2
+    l = leny*100/ind
+    #print("D:",upy,leny)
+    fnss = (upy+l)/2
+    return fnss
 
 def rulet(pond):
     pond = np.ravel(pond)
@@ -252,11 +259,32 @@ def selection(pob,ev,nchilds): #hierarchy
     return chlist
         
 def cross(c1,c2):
-    r1 = np.random.randint(1,c1.distances.shape[0]-1)
-    r2 = np.random.randint(1,c1.amplitudes.shape[0]-1)
+    r1 = np.random.randint(0,c1.distances.shape[0]-1)
+    while True:
+        r2 = np.random.randint(0,c1.amplitudes.shape[0]-1)
+        if r2!=r1:
+            break
+    r3 = np.random.randint(0,c1.distances.shape[0]-1)
+    while True:
+        r4 = np.random.randint(0,c1.amplitudes.shape[0]-1)
+        if r4!=r3:
+            break
     
-    c1.distances[0:r1] = c2.distances[0:r1]
-    c1.amplitudes[0:r1] = c2.amplitudes[0:r1]
+    if r1<r2:
+        r11 = r1
+        r22 = r2
+    else:
+        r11 = r2
+        r22 = r1
+    if r3<r3:
+        r33 = r3
+        r44 = r4
+    else:
+        r33 = r4
+        r44 = r3
+
+    c1.distances[r11:r22] = c2.distances[r11:r22]
+    c1.amplitudes[r33:r44] = c2.amplitudes[r33:r44]
     return c1
     
 def computeCandidate(father, childs):
@@ -275,9 +303,11 @@ def computeCandidate(father, childs):
     candidate.distances = np.absolute(candidate.distances)
     candidate.distances = np.clip(candidate.distances,0.5,None)
     candidate.amplitudes += childs[0].amplitudes
-    candidate.amplitudes = np.absolute(candidate.amplitudes)
-    candidate.amplitudes = np.clip(candidate.amplitudes,1.,None)
-    
+    #candidate.amplitudes = np.absolute(candidate.amplitudes)
+    #candidate.amplitudes = np.clip(candidate.amplitudes,1.,None)
+    for i in range(candidate.amplitudes.shape[0]):
+        if candidate.amplitudes[i]==0:
+            candidate.amplitudes[i] += 1e-7
     if np.random.randint(0,100) < 90:
         candidate = cross(candidate,father)
     
@@ -294,11 +324,13 @@ if __name__ == "__main__":
     pob = getInitPob(200,antenas)
     print("Done!")
     
+    ex = 0
+
     #Main loop
     print("Executing diferential evolution algorithm...")
     for g in range(generations):
             time.sleep(0.1)
-            clear_output()
+            #clear_output()
             
             print("Generation %d:" % g)
             np.random.seed(1)
@@ -308,8 +340,11 @@ if __name__ == "__main__":
             #Sorting
             print("\tSorting...")
             sorty = sortby(ev,1)
+            #print(sorty)
+            #print(ev)
+            time.sleep(1)
             print("Best result so far:")
-            best = pob[int(ev[0,0])]
+            best = pob[int(sorty[0,0])]
             if pyth:
               plt.close('all')
             plt.plot(best.graph)
@@ -321,6 +356,7 @@ if __name__ == "__main__":
             print("Ants positions: ",best.antPos)
             print("Distances: ", best.distances)
             print("\tDiferential algorithm...")
+            pra = False
             for i in range(len(pob)):
                 chars = 40
                 por = int((i+1)*chars/len(pob))
@@ -332,8 +368,30 @@ if __name__ == "__main__":
                 print("\t\t||",uno,dos,"|| ",int((i+1)*100/len(pob)),"%" , end='\r')
                 #Selection
                 pi = pob[i]
-                childs = selection(pob,sorty,3)
+                #childs = selection(pob,sorty,3)
+                childs = selection(pob,ev,3)
                 can = computeCandidate(pi,childs)
-                if evalu(can)>evalu(pi):
+                canev = evalu(can)
+                piev = evalu(pi)
+                #print(canev,piev,canev<piev)
+                if canev<piev:
+                    ex = 0
+                    pra = True
                     pob[i] = can
+                if pra:
+                    print("Storing candidate!", end= '\r')
+            ex += 1
+            if ex > 20:
+                print("Algorithm ended because of 20 generations without changes")
+                break
 
+with open("best_result.txt", "w+") as f:
+    f.write("Amps:\n")
+    for i in range(best.amplitudes.shape[0]):
+       f.write("%f," % best.amplitudes[i])
+    f.write("\n")
+    f.write("Distances:\n")
+    for i in range(best.amplitudes.shape[0]):
+       f.write("%f," % best.distances[i])
+    f.write("\n")
+plt.savefig('Best_res.png')
